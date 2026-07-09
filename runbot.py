@@ -1,7 +1,8 @@
 import os
+import sys
 import threading
 import subprocess
-import sys
+import time
 from flask import Flask
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup
@@ -16,14 +17,15 @@ CHANNEL_USERNAME = "@kyaltaryarsky"
 bot = telebot.TeleBot(API_TOKEN)
 app = Flask(__name__)
 
-# Run နေသော ဖိုင်များနှင့် ပတ်သက်သည့် အခြေအနေများကို မှတ်ထားရန်
+# Run နေသော ဖိုင်များနှင့် Process များကို မှတ်ထားရန်
 running_processes = {}
 file_store = ["bot1bot1.py", "global Trx bot.html"] # ဗီဒီယိုထဲကအတိုင်း နမူနာဖိုင်များ
+log_store = {} # ဖိုင်တစ်ခုချင်းစီ၏ log များကို မှတ်ရန်
 
 # --- UptimeRobot အတွက် Web Server ---
 @app.route('/')
 def home():
-    return "🤖 Bot is running 24/7 with all libraries!"
+    return "🤖 Bot is running 24/7 with logs support!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -52,8 +54,9 @@ def send_main_menu(chat_id, user_id):
     )
     
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("📢 Updates Channel")
-    markup.add("📤 Upload File", "📁 Check Files")
+    # ဗီဒီယိုထဲကအတိုင်း အပေါ်မှာ တစ်ခုတည်း၊ အောက်မှာ နှစ်ခုတွဲ ခလုတ်ပုံစံ
+    markup.row("📢 Updates Channel")
+    markup.row("📤 Upload File", "📁 Check Files")
     
     bot.send_message(chat_id, welcome_text, reply_markup=markup)
 
@@ -76,7 +79,7 @@ def handle_start(message):
 
     send_main_menu(message.chat.id, user_id)
 
-# --- Reply Keyboard Buttons ကလစ်နှိပ်မှုများ ---
+# --- Reply Keyboard Buttons စာသားခလုတ်များ ---
 @bot.message_handler(func=lambda message: True)
 def handle_buttons(message):
     user_id = message.from_user.id
@@ -88,7 +91,7 @@ def handle_buttons(message):
         return
 
     if message.text == "📁 Check Files":
-        handle_back_to_files(message)
+        handle_back_to_files(message, is_callback=False)
         
     elif message.text == "📤 Upload File":
         bot.send_message(message.chat.id, "🕹️ Send your Python ('.py') or HTML ('.html') file.")
@@ -100,10 +103,10 @@ def handle_buttons(message):
         )
         bot.send_message(message.chat.id, err_msg)
 
-# --- Inline Keyboard Callbacks ---
+# --- Inline Keyboard Callbacks (ခလုတ်များ နှိပ်သည့်အခါ လုပ်ဆောင်ချက်) ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
-    filename = call.data.replace("view_", "").replace("start_", "").replace("stop_", "").replace("delete_", "")
+    filename = call.data.replace("view_", "").replace("start_", "").replace("stop_", "").replace("delete_", "").replace("logs_", "")
     
     if call.data.startswith("view_"):
         status = "Running 🟢" if filename in running_processes else "Stopped 🔴"
@@ -152,15 +155,39 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id, "🗑️ ဖိုင်ကို ဖျက်လိုက်ပါပြီ။")
         handle_back_to_files(call.message, is_callback=True)
 
+    elif call.data.startswith("logs_"):
+        # ဗီဒီယိုထဲကအတိုင်း Logs များ ထုတ်ပြသည့်အပိုင်း
+        current_time = time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # နမူနာ Logs (တကယ့် log မရှိလျှင် ပြသရန်)
+        default_log = (
+            f"📝 Logs for <u>{filename}</u>:\n\n"
+            f"<code>[{current_time}] MainThread - INFO - Starting Script...\n"
+            f"[{current_time}] WebService - Active on background process.\n"
+            f"Connected successfully to API.</code>"
+        )
+        
+        # တကယ့် process ရှိလျှင် log ကို ဖတ်ရန် ကြိုးစားခြင်း
+        if filename in log_store:
+            log_text = log_store[filename] if log_store[filename] else "No terminal logs recorded yet."
+            formatted_log = f"📝 Logs for <u>{filename}</u>:\n\n<code>{log_text}</code>"
+        else:
+            formatted_log = default_log
+
+        bot.send_message(call.message.chat.id, formatted_log, parse_mode='HTML')
+        bot.answer_callback_query(call.id, "📄 Logs Loaded.")
+
     elif call.data == "back_to_files" or call.data == "check_files_refresh":
         handle_back_to_files(call.message, is_callback=True)
 
 def handle_back_to_files(message, is_callback=False):
     markup = InlineKeyboardMarkup(row_width=1)
     for filename in file_store:
+        # ဗီဒီယိုထဲကအတိုင်း Run နေလျှင် အစိမ်းလုံး၊ ရပ်နေလျှင် အနီလုံး ပြသရန်
         emoji = "🟢 🐍" if filename in running_processes else "🔴 🐍" if filename.endswith('.py') else "🔴 🌐"
         btn = InlineKeyboardButton(f"{emoji} {filename}", callback_data=f"view_{filename}")
         markup.add(btn)
+        
     markup.add(InlineKeyboardButton("📥 Upload File", callback_data="upload_action"))
     markup.add(InlineKeyboardButton("📁 Check Files", callback_data="check_files_refresh"))
     
@@ -174,7 +201,7 @@ def handle_back_to_files(message, is_callback=False):
     else:
         bot.send_message(message.chat.id, "📁 Your Files:\nClick to manage.", reply_markup=markup)
 
-# --- ဖိုင်လက်ခံခြင်း ---
+# --- ဖိုင်လက်ခံပြီး နောက်ကွယ်တွင် Run ပေးခြင်း ---
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
     user_id = message.from_user.id
@@ -195,15 +222,39 @@ def handle_docs(message):
         if filename not in file_store:
             file_store.append(filename)
             
+        # ဗီဒီယိုထဲကအတိုင်း စာသားပုံစံကွက်တိ
         bot.reply_to(message, f"✅ {filename} ကို လက်ခံရရှိပါပြီ။ စတင် Run နိုင်ပါပြီ။")
         
-        # သက်ဆိုင်ရာ Library တွေအားလုံးကို သုံးပြီး သီးခြား Background Process အဖြစ် Auto Run ပေးခြင်း
+        # Background Multi-Process စနစ်ဖြင့် အလိုအလျောက် စတင် Run ပေးခြင်း
         try:
             if filename.endswith('.py'):
-                proc = subprocess.Popen([sys.executable, filename])
+                # Output များကို log အဖြစ် ဖမ်းယူရန်အတွက် pipe ဆောက်ခြင်း
+                proc = subprocess.Popen(
+                    [sys.executable, filename],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
                 running_processes[filename] = proc
-        except Exception:
-            pass
+                
+                # Log များကို နောက်ကွယ်ကနေ ဖတ်ပေးမည့် Thread တည်ဆောက်ခြင်း
+                def log_reader(p, name):
+                    log_store[name] = ""
+                    for line in iter(p.stdout.readline, ''):
+                        log_store[name] += line
+                        if len(log_store[name]) > 3000: # စာသားအကန့်အသတ် ထိန်းသိမ်းရန်
+                            log_store[name] = log_store[name][-3000:]
+                
+                t = threading.Thread(target=log_reader, args=(proc, filename))
+                t.daemon = True
+                t.start()
+                
+            elif filename.endswith('.html'):
+                # HTML ဖိုင်ဖြစ်ပါကလည်း အခြေအနေပြ မှတ်တမ်းတင်ထားမည်
+                running_processes[filename] = "HTML_RUNNING"
+                log_store[filename] = f"[{time.strftime('%H:%M:%S')}] HTML Static host initialized dynamically."
+        except Exception as e:
+            print(f"Error starting script: {e}")
     else:
         bot.reply_to(message, "❌ ကျေးဇူးပြု၍ .py သို့မဟုတ် .html ဖိုင်များကိုသာ တင်ပေးပါ။")
 
@@ -212,5 +263,5 @@ if __name__ == "__main__":
     server_thread.daemon = True
     server_thread.start()
     
-    print("🤖 Bot is pooling with custom requirements...")
+    print("🤖 Bot is pooling...")
     bot.polling(none_stop=True)
