@@ -1,5 +1,13 @@
 pyTelegramBotAPI
-flask
+Flask
+httpx
+requests
+aiohttp
+beautifulsoup4
+python-telegram-bot
+opencv-python-headless
+ddddocr
+numpy
+rich
+python-cfonts
 gunicorn
-selenium
-webdriver-manager
